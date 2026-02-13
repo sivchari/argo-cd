@@ -470,6 +470,17 @@ func GetClusterSharding(kubeClient kubernetes.Interface, settingsMgr *settings.S
 		replicasCount = int(*appControllerDeployment.Spec.Replicas)
 	} else {
 		replicasCount = env.ParseNumFromEnv(common.EnvControllerReplicas, 0, 0, math.MaxInt32)
+		// Warn if ARGOCD_CONTROLLER_REPLICAS is greater than actual replicas
+		if replicasCount > 0 {
+			actualReplicas, err := getActualControllerReplicas(kubeClient, settingsMgr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get actual controller replicas: %w", err)
+			}
+			if replicasCount != actualReplicas {
+				log.Warnf("ARGOCD_CONTROLLER_REPLICAS (%d) does not match the actual replicas (%d). "+
+					"This may cause application processing issues.", replicasCount, actualReplicas)
+			}
+		}
 	}
 	shardNumber := env.ParseNumFromEnv(common.EnvControllerShard, -1, -math.MaxInt32, math.MaxInt32)
 	if replicasCount > 1 {
@@ -508,4 +519,26 @@ func GetClusterSharding(kubeClient kubernetes.Interface, settingsMgr *settings.S
 	}
 	db := db.NewDB(settingsMgr.GetNamespace(), settingsMgr, kubeClient)
 	return NewClusterSharding(db, shardNumber, replicasCount, shardingAlgorithm), nil
+}
+
+// getActualControllerReplicas returns the actual number of replicas for the application controller
+// by checking the Deployment or StatefulSet. This is used to warn users when ARGOCD_CONTROLLER_REPLICAS
+// is greater than the actual replicas.
+func getActualControllerReplicas(kubeClient kubernetes.Interface, settingsMgr *settings.SettingsManager) (int, error) {
+	applicationControllerName := env.StringFromEnv(common.EnvAppControllerName, common.DefaultApplicationControllerName)
+	namespace := settingsMgr.GetNamespace()
+
+	// Try Deployment first
+	deployment, err := kubeClient.AppsV1().Deployments(namespace).Get(context.Background(), applicationControllerName, metav1.GetOptions{})
+	if err == nil && deployment.Spec.Replicas != nil {
+		return int(*deployment.Spec.Replicas), nil
+	}
+
+	// If Deployment not found, try StatefulSet
+	statefulSet, err := kubeClient.AppsV1().StatefulSets(namespace).Get(context.Background(), applicationControllerName, metav1.GetOptions{})
+	if err == nil && statefulSet.Spec.Replicas != nil {
+		return int(*statefulSet.Spec.Replicas), nil
+	}
+
+	return 0, fmt.Errorf("could not find controller deployment or statefulset: %s", applicationControllerName)
 }

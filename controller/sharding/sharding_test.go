@@ -1057,3 +1057,103 @@ spec:
 	}
 	return app
 }
+
+func TestGetActualControllerReplicas(t *testing.T) {
+	IntPtr := func(i int32) *int32 {
+		return &i
+	}
+
+	testCases := []struct {
+		name             string
+		objects          []runtime.Object
+		controllerName   string
+		expectedReplicas int
+		expectError      bool
+	}{
+		{
+			name: "Deployment exists",
+			objects: []runtime.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      common.DefaultApplicationControllerName,
+						Namespace: "argocd",
+					},
+					Spec: appsv1.DeploymentSpec{
+						Replicas: IntPtr(3),
+					},
+				},
+			},
+			controllerName:   common.DefaultApplicationControllerName,
+			expectedReplicas: 3,
+			expectError:      false,
+		},
+		{
+			name: "StatefulSet exists",
+			objects: []runtime.Object{
+				&appsv1.StatefulSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      common.DefaultApplicationControllerName,
+						Namespace: "argocd",
+					},
+					Spec: appsv1.StatefulSetSpec{
+						Replicas: IntPtr(2),
+					},
+				},
+			},
+			controllerName:   common.DefaultApplicationControllerName,
+			expectedReplicas: 2,
+			expectError:      false,
+		},
+		{
+			name:             "Neither Deployment nor StatefulSet exists",
+			objects:          []runtime.Object{},
+			controllerName:   common.DefaultApplicationControllerName,
+			expectedReplicas: 0,
+			expectError:      true,
+		},
+		{
+			name: "Deployment takes precedence over StatefulSet",
+			objects: []runtime.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      common.DefaultApplicationControllerName,
+						Namespace: "argocd",
+					},
+					Spec: appsv1.DeploymentSpec{
+						Replicas: IntPtr(5),
+					},
+				},
+				&appsv1.StatefulSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      common.DefaultApplicationControllerName,
+						Namespace: "argocd",
+					},
+					Spec: appsv1.StatefulSetSpec{
+						Replicas: IntPtr(3),
+					},
+				},
+			},
+			controllerName:   common.DefaultApplicationControllerName,
+			expectedReplicas: 5,
+			expectError:      false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(common.EnvAppControllerName, tc.controllerName)
+
+			kubeclientset := kubefake.NewSimpleClientset(tc.objects...)
+			settingsMgr := settings.NewSettingsManager(t.Context(), kubeclientset, "argocd")
+
+			replicas, err := getActualControllerReplicas(kubeclientset, settingsMgr)
+
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedReplicas, replicas)
+			}
+		})
+	}
+}
