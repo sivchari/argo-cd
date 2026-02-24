@@ -93,6 +93,9 @@ func ReadLocalConfig(path string) (*LocalConfig, error) {
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
 	err = ValidateLocalConfig(localconfig)
 	if err != nil {
 		return nil, err
