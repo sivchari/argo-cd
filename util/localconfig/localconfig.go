@@ -94,7 +94,7 @@ func ReadLocalConfig(path string) (*LocalConfig, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 	err = ValidateLocalConfig(localconfig)
 	if err != nil {
